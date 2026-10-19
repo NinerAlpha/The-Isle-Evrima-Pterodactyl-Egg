@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Shell syntax check
+        run: |
+          for f in docker/*.sh docker/sections/*.sh docker/helpers/*.sh install-script.sh tests/*.sh; do
+            echo "bash -n $f"
+            bash -n "$f"
+          done
+
+      - name: ShellCheck
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          # --severity=warning skips info-level SC1091 (sources use absolute
+          # container paths that don't exist on the CI runner).
+          shellcheck --severity=warning \
+            docker/*.sh docker/sections/*.sh docker/helpers/*.sh install-script.sh tests/*.sh
+
+      - name: Node syntax check
+        run: node --check docker/wrapper.js && node --check docker/rcon.js
+
+      - name: Egg JSON validation
+        run: |
+          python3 - <<'PY'
+          import json
+          egg = json.load(open("egg-the-isle-multibranch.json"))
+          embedded = egg["scripts"]["installation"]["script"]
+          assert embedded == open("install-script.sh").read(), \
+              "egg installation script is out of sync with install-script.sh"
+          print("egg JSON valid, install script in sync")
+          PY
+
+      - name: Regression tests
+        run: |
+          for t in tests/*_test.sh; do
+            echo "== $t"
+            bash "$t"
+          done
+          for t in tests/*_test.js; do
+            echo "== $t"
+            node "$t"
+          done

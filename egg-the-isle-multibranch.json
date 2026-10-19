@@ -1,0 +1,272 @@
+{
+    "_comment": "DO NOT EDIT: FILE GENERATED AUTOMATICALLY BY PTERODACTYL PANEL - PTERODACTYL.IO",
+    "meta": {
+        "version": "PTDL_v2",
+        "update_url": null
+    },
+    "exported_at": "2026-10-19T00:00:00+00:00",
+    "name": "The Isle (Multi-Branch)",
+    "author": "fredrik.johansenfuun@gmail.com",
+    "description": "The Isle dedicated server with one-variable branch switching: Evrima (live), Spiro (frozen 0.11.59.04), Hordetesting (private test branch) and Legacy (Windows build via Wine). Each branch keeps its own install, saves and Game.ini; ports and RCON are configured automatically, and the panel console speaks Evrima RCON (announce, kick, playerlist, save, ...) so no external bot is needed.",
+    "features": [
+        "steam_disk_space"
+    ],
+    "docker_images": {
+        "The Isle (multi-branch)": "ghcr.io/nineralpha/the_isle:latest"
+    },
+    "file_denylist": [],
+    "startup": "{{GAME_BRANCH}} server on port {{SERVER_PORT}} (launch handled by the image)",
+    "config": {
+        "files": "{}",
+        "startup": "{\n    \"done\": [\n        \"Load map complete\",\n        \"seconds to LoadMap\",\n        \"Game Engine Initialized\"\n    ]\n}",
+        "logs": "{}",
+        "stop": "^C"
+    },
+    "scripts": {
+        "installation": {
+            "script": "#!/bin/bash\n# The Isle (multi-branch) - install script\n# Runs in the debian:trixie-slim installer container. Server files: /mnt/server\n#\n# Installs SteamCMD and the selected Game Branch into branches/<branch>/.\n# Everything else (configs, ports, branch switching, migration of servers made\n# with the previous egg) is handled by the image's entrypoint on every start.\n# Keep this file in sync with the egg's embedded installation script.\n\nexport DEBIAN_FRONTEND=noninteractive\ndpkg --add-architecture i386\napt-get update\napt-get install -y --no-install-recommends curl ca-certificates tar lib32gcc-s1 lib32stdc++6\n\nAPPID=412680\nSERVER=/mnt/server\n\n## resolve branch (mirrors docker/helpers/branches.sh)\nBRANCH=\"$(echo \"${GAME_BRANCH:-evrima}\" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')\"\nPASS_ARGS=()\ncase \"${BRANCH}\" in\n    evrima)       STEAM_BRANCH=\"evrima\";          PLATFORM=\"linux\" ;;\n    spiro)        STEAM_BRANCH=\"spiro0.11.59.04\"; PLATFORM=\"linux\" ;;\n    hordetesting) STEAM_BRANCH=\"${HORDETEST_BRANCH:-hordetesting}\"; PLATFORM=\"linux\"\n                  [ -n \"${BETA_PASSWORD:-}\" ] && PASS_ARGS=(-betapassword \"${BETA_PASSWORD}\") ;;\n    legacy)       STEAM_BRANCH=\"public\";          PLATFORM=\"windows\" ;;\n    *)\n        echo \"Unknown Game Branch '${GAME_BRANCH}' - installing evrima\"\n        BRANCH=\"evrima\"; STEAM_BRANCH=\"evrima\"; PLATFORM=\"linux\"\n        ;;\nesac\nINSTALL_DIR=\"${SERVER}/branches/${BRANCH}\"\n\necho \"-----------------------------------------\"\necho \"Installing The Isle branch: ${BRANCH} (Steam branch: ${STEAM_BRANCH}, ${PLATFORM})\"\necho \"-----------------------------------------\"\n\n## download and install steamcmd\ncd /tmp || exit 1\nmkdir -p \"${SERVER}/steamcmd\" \"${INSTALL_DIR}\"\ncurl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz\ntar -xzvf steamcmd.tar.gz -C \"${SERVER}/steamcmd\"\ncd \"${SERVER}/steamcmd\" || exit 1\n\n# SteamCMD fails otherwise for some reason, even running as root.\nchown -R root:root /mnt\nexport HOME=\"${SERVER}\"\n\n# SteamCMD warmup (prevents \"Missing configuration\" on first run)\n./steamcmd.sh +login anonymous +quit || true\n\n## install game (always validated on install/reinstall)\nif ./steamcmd.sh +@sSteamCmdForcePlatformType \"${PLATFORM}\" +force_install_dir \"${INSTALL_DIR}\" \\\n        +login anonymous +app_update \"${APPID}\" -beta \"${STEAM_BRANCH}\" \"${PASS_ARGS[@]}\" validate +quit; then\n    echo \"${BRANCH}\" > \"${SERVER}/.active-branch\"\nelse\n    echo \"SteamCMD failed to install '${STEAM_BRANCH}'. The server will retry on start.\"\n    [ \"${BRANCH}\" = \"hordetesting\" ] && echo \"Hordetesting is a private branch - check the Beta Password variable.\"\nfi\n\n## Steam client libraries for the Linux server builds\nmkdir -p \"${SERVER}/.steam/sdk32\" \"${SERVER}/.steam/sdk64\"\ncp -v linux32/steamclient.so \"${SERVER}/.steam/sdk32/steamclient.so\"\ncp -v linux64/steamclient.so \"${SERVER}/.steam/sdk64/steamclient.so\"\n\n## Backups: only saves and configs of every branch\ncat > \"${SERVER}/.pteroignore\" << 'EOF'\n*\n!branches/\n!branches/*/\n!branches/*/TheIsle/\n!branches/*/TheIsle/Saved/\n!branches/*/TheIsle/Saved/**\nEOF\n\necho \"-----------------------------------------\"\necho \"Installation completed (branch: ${BRANCH})\"\necho \"-----------------------------------------\"\n",
+            "container": "debian:trixie-slim",
+            "entrypoint": "bash"
+        }
+    },
+    "custom": {
+        "slot_limit": true,
+        "protocol": "the_isle",
+        "port_names": "evrima_main, evrima_query, evrima_rcon, evrima_queue",
+        "port_increment": 5,
+        "query_offset": 0
+    },
+    "variables": [
+        {
+            "name": "Game Branch",
+            "description": "Which branch of The Isle to run: evrima (live), spiro (frozen 0.11.59.04), hordetesting (private test branch - needs Beta Password) or legacy (original The Isle, Windows build via Wine, no RCON/queue). To switch: change this value and restart. The server downloads the branch into its own folder, keeps every branch's saves and Game.ini separately, and fixes ports/RCON automatically. No reinstall or Docker image change needed.",
+            "env_variable": "GAME_BRANCH",
+            "default_value": "evrima",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:evrima,spiro,hordetesting,legacy",
+            "field_type": "text",
+            "order": 0
+        },
+        {
+            "name": "Legacy Map",
+            "description": "Map for the Legacy branch only (ignored on Evrima/Spiro). thenyaw = Thenyaw Island, isle_v3 = Isle V3, isle_v4 = Isle V4 (Landscape 04), region2 = Region 2, redwoods = Region 2 Redwoods, dv_testlevel = developer test level.",
+            "env_variable": "LEGACY_MAP",
+            "default_value": "thenyaw",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:thenyaw,isle_v3,isle_v4,region2,redwoods,dv_testlevel",
+            "field_type": "text",
+            "order": 1
+        },
+        {
+            "name": "Server Name",
+            "description": "Sets the name for the server",
+            "env_variable": "SERVER_NAME",
+            "default_value": "Pine Hosting - The Isle Server",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|max:70",
+            "field_type": "text",
+            "order": 2
+        },
+        {
+            "name": "Max Players",
+            "description": "",
+            "env_variable": "MAX_PLAYERS",
+            "default_value": "100",
+            "user_viewable": true,
+            "user_editable": false,
+            "rules": "required|numeric|digits_between:1,500",
+            "field_type": "text",
+            "order": 3
+        },
+        {
+            "name": "Allow Replay",
+            "description": "Enable or disable Replay (Evrima/Spiro only)",
+            "env_variable": "ALLOW_REPLAY",
+            "default_value": "false",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:true,false",
+            "field_type": "text",
+            "order": 4
+        },
+        {
+            "name": "Humans",
+            "description": "Enable or disable humans (Evrima/Spiro only)",
+            "env_variable": "HUMANS",
+            "default_value": "false",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:true,false",
+            "field_type": "text",
+            "order": 5
+        },
+        {
+            "name": "Enable Dynamic weather",
+            "description": "Enable or disable dynamic weather",
+            "env_variable": "DYNAMIC_WEATHER",
+            "default_value": "true",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:true,false",
+            "field_type": "text",
+            "order": 6
+        },
+        {
+            "name": "Query Port",
+            "description": "Steam query port for the Legacy branch (Evrima-based branches report on the game port). 0 = automatic: game port + 1.",
+            "env_variable": "QUERY_PORT",
+            "default_value": "0",
+            "user_viewable": true,
+            "user_editable": false,
+            "rules": "required|numeric",
+            "field_type": "text",
+            "order": 7
+        },
+        {
+            "name": "RCON Port",
+            "description": "RCON port. RCON is always enabled: the panel console sends commands through it. 0 = automatic: game port + 2.",
+            "env_variable": "RCON_PORT",
+            "default_value": "0",
+            "user_viewable": true,
+            "user_editable": false,
+            "rules": "required|numeric",
+            "field_type": "text",
+            "order": 8
+        },
+        {
+            "name": "RCON Password",
+            "description": "Password for RCON (used by the panel console and any external tools).",
+            "env_variable": "RCON_PASSWORD",
+            "default_value": "$random_password",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string",
+            "field_type": "text",
+            "order": 9
+        },
+        {
+            "name": "Enable Queue",
+            "description": "Enable the queue (Evrima/Spiro only)",
+            "env_variable": "ENABLE_QUEUE",
+            "default_value": "true",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:true,false",
+            "field_type": "text",
+            "order": 10
+        },
+        {
+            "name": "Queue Port",
+            "description": "Queue port (Evrima/Spiro/Hordetesting). 0 = automatic: game port + 3.",
+            "env_variable": "QUEUE_PORT",
+            "default_value": "0",
+            "user_viewable": true,
+            "user_editable": false,
+            "rules": "required|numeric",
+            "field_type": "text",
+            "order": 11
+        },
+        {
+            "name": "Discord",
+            "description": " On Legacy enter only the invite code (e.g. abc123), not the full discord.gg link.",
+            "env_variable": "DISCORD",
+            "default_value": "https://discord.gg/gzr4wVf",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string",
+            "field_type": "text",
+            "order": 12
+        },
+        {
+            "name": "Server Password Enabled",
+            "description": "Enable server password",
+            "env_variable": "SERVER_PASSWORD_ENABLED",
+            "default_value": "false",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:true,false",
+            "field_type": "text",
+            "order": 13
+        },
+        {
+            "name": "Server Password",
+            "description": "The password of the server",
+            "env_variable": "SERVER_PASSWORD",
+            "default_value": "No password",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|max:20",
+            "field_type": "text",
+            "order": 14
+        },
+        {
+            "name": "Auto Update",
+            "description": "Update the server on every restart (branch-aware: always updates against the branch selected in Game Branch). A branch switch always forces a validated update regardless of this setting.",
+            "env_variable": "AUTO_UPDATE",
+            "default_value": "1",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|boolean",
+            "field_type": "text",
+            "order": 15
+        },
+        {
+            "name": "Validate on Update",
+            "description": "Add 'validate' to every SteamCMD update (slower start, repairs corrupted files). Branch switches always validate.",
+            "env_variable": "VALIDATE",
+            "default_value": "0",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|boolean",
+            "field_type": "text",
+            "order": 16
+        },
+        {
+            "name": "Beta Password",
+            "description": "Steam beta password for the private hordetesting branch. Ignored by other branches.",
+            "env_variable": "BETA_PASSWORD",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|max:128",
+            "field_type": "text",
+            "order": 17
+        },
+        {
+            "name": "Hordetest Steam Branch",
+            "description": "Steam branch name used for the hordetesting Game Branch. Only change this if the developers rename the branch.",
+            "env_variable": "HORDETEST_BRANCH",
+            "default_value": "hordetesting",
+            "user_viewable": true,
+            "user_editable": false,
+            "rules": "required|string|regex:/^[A-Za-z0-9._-]+$/|max:64",
+            "field_type": "text",
+            "order": 18
+        },
+        {
+            "name": "Prune Inactive Branches",
+            "description": "1 = delete the game files of branches you are not running to save disk (their saves and Game.ini are kept; switching back re-downloads). 0 = keep every installed branch for instant switching.",
+            "env_variable": "PRUNE_INACTIVE_BRANCHES",
+            "default_value": "1",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|boolean",
+            "field_type": "text",
+            "order": 19
+        },
+        {
+            "name": "Egg Debug",
+            "description": "Verbose startup logging.",
+            "env_variable": "EGG_DEBUG",
+            "default_value": "0",
+            "user_viewable": true,
+            "user_editable": false,
+            "rules": "required|boolean",
+            "field_type": "text",
+            "order": 20
+        }
+    ]
+}
